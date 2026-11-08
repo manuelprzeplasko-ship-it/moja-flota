@@ -1,14 +1,14 @@
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import {getFirestore,collection,doc,addDoc,setDoc,updateDoc,getDoc,getDocs,query,orderBy,onSnapshot,serverTimestamp,runTransaction} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+import {getFirestore,collection,doc,addDoc,setDoc,updateDoc,getDoc,getDocs,query,orderBy,onSnapshot,serverTimestamp,runTransaction,deleteDoc} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,configured} from './firebase-config.js';
 import {drives,intervals,formatKm,dueText,esc,dateString} from './common.js';
 const $=id=>document.getElementById(id);const origin=()=>new URL('zgloszenie.html',location.href).href;
 if(configured){$('setup').hidden=true;const fb=initializeApp(firebaseConfig),auth=getAuth(fb),db=getFirestore(fb);let vehicles=[],reports=[],unsubs=[];
 const clear=()=>{unsubs.forEach(fn=>fn());unsubs=[];};
 onAuthStateChanged(auth,u=>{clear();$('login').hidden=!!u;$('app').hidden=!u;$('logout').hidden=!u;if(!u)return;
- unsubs.push(onSnapshot(collection(db,'vehicles'),s=>{vehicles=s.docs.map(d=>({id:d.id,...d.data()}));render();},e=>alert('Brak dostępu do pojazdów: '+e.message)));
- unsubs.push(onSnapshot(collection(db,'reports'),s=>{reports=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));renderReports();},e=>alert('Brak dostępu do zgłoszeń: '+e.message)));
+ unsubs.push(onSnapshot(collection(db,'vehicles'),s=>{vehicles=s.docs.map(d=>({id:d.id,...d.data()}));render();renderReportHistory();},e=>alert('Brak dostępu do pojazdów: '+e.message)));
+ unsubs.push(onSnapshot(collection(db,'reports'),s=>{reports=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));renderReports();renderReportHistory();},e=>alert('Brak dostępu do zgłoszeń: '+e.message)));
 });
 $('loginForm').onsubmit=async e=>{e.preventDefault();try{await signInWithEmailAndPassword(auth,$('email').value,$('password').value);$('loginError').textContent='';}catch(err){$('loginError').textContent='Nie udało się zalogować. Sprawdź konto i reguły dostępu.';}};
 $('logout').onclick=()=>signOut(auth);
@@ -36,6 +36,27 @@ async function addRepair(v){const date=prompt('Data naprawy (RRRR-MM-DD):',new D
 async function loadHistory(id){try{const s=await getDocs(collection(db,'vehicles',id,'history'));const h=s.docs.map(x=>x.data()).sort((a,b)=>b.date.localeCompare(a.date));$('history').innerHTML=h.length?`<table><tr><th>Data</th><th>Rodzaj</th><th>Przebieg</th><th>Opis / koszt</th></tr>${h.map(x=>`<tr><td>${esc(x.date)}</td><td>${esc({oil:'Olej',gas:'Gaz',repair:'Naprawa'}[x.kind]||x.kind)}</td><td>${formatKm(x.km)}</td><td>${esc(x.note||'')} ${x.cost==null?'':esc(x.cost)+' zł'}</td></tr>`).join('')}</table>`:'Brak wpisów.';}catch(e){$('history').textContent=e.message;}}
 $('closeDetail').onclick=()=>$('detailDialog').close();
 function renderReports(){$('reportCount').textContent=reports.filter(r=>r.status==='new').length;$('reports').innerHTML=reports.filter(r=>r.status==='new').map(r=>{const v=vehicles.find(x=>x.id===r.vehicleId);return `<div class="report"><b>${esc(v?.name||'Pojazd '+r.vehicleId)}</b> · ${esc(r.driverName)} · ${formatKm(r.odometer)}<p>${esc(r.note||'Bez uwag')}</p><p class="muted small">${esc(dateString(r.createdAt))}</p><button data-report="${r.id}" data-action="approve">Zatwierdź przebieg</button> <button class="secondary" data-report="${r.id}" data-action="reject">Odrzuć</button></div>`;}).join('')||'<p class="muted">Brak nowych zgłoszeń.</p>';}
+function reportDate(v){return v?.toDate?.().toLocaleString('pl-PL',{dateStyle:'medium',timeStyle:'short'})||'—';}
+function renderReportHistory(){
+ const filter=$('historyVehicleFilter'),selected=filter.value;
+ filter.innerHTML='<option value="all">Wszystkie pojazdy</option>'+vehicles.map(v=>`<option value="${esc(v.id)}">${esc(v.name)} (${esc(v.plate)})</option>`).join('');
+ filter.value=selected==='all'||vehicles.some(v=>v.id===selected)?selected:'all';
+ const reviewed=reports.filter(r=>r.status==='approved'||r.status==='rejected').filter(r=>filter.value==='all'||r.vehicleId===filter.value);
+ $('reportHistory').innerHTML=reviewed.length?reviewed.map(r=>{
+ const v=vehicles.find(x=>x.id===r.vehicleId),approved=r.status==='approved';
+ return `<div class="report"><div class="line"><b>${esc(v?.name||'Pojazd usunięty')} · ${esc(v?.plate||'')}</b>${badge(approved?'Zatwierdzone':'Odrzucone',approved?'good':'bad')}</div><p class="small"><b>Kierowca:</b> ${esc(r.driverName)} · <b>Przebieg zgłoszony:</b> ${formatKm(r.odometer)}</p><p class="small"><b>Zgłoszono:</b> ${esc(reportDate(r.createdAt))} · <b>Rozpatrzono:</b> ${esc(reportDate(r.reviewedAt))}</p><p>${esc(r.note||'Bez uwag')}</p><button type="button" class="danger" data-delete-report="${esc(r.id)}">Usuń zgłoszenie</button></div>`;
+ }).join(''):'<p class="muted">Brak rozpatrzonych zgłoszeń dla wybranego pojazdu.</p>';
+}
+$('historyVehicleFilter').onchange=renderReportHistory;
+$('reportHistory').onclick=async e=>{
+ const btn=e.target.closest('button[data-delete-report]');if(!btn)return;
+ const r=reports.find(x=>x.id===btn.dataset.deleteReport);
+ if(!r||!['approved','rejected'].includes(r.status)){alert('Nie znaleziono rozpatrzonego zgłoszenia.');return;}
+ const v=vehicles.find(x=>x.id===r.vehicleId);
+ if(!confirm(`Czy na pewno trwale usunąć zgłoszenie kierowcy ${r.driverName} dla ${v?.name||'pojazdu'} (${formatKm(r.odometer)})?\n\nUsunięcie nie zmieni aktualnego przebiegu pojazdu. Tej operacji nie można cofnąć.`))return;
+ btn.disabled=true;
+ try{await deleteDoc(doc(db,'reports',r.id));}catch(err){btn.disabled=false;alert('Nie udało się usunąć zgłoszenia: '+err.message);}
+};
 $('reports').onclick=async e=>{const b=e.target.closest('button[data-report]');if(!b)return;const r=reports.find(x=>x.id===b.dataset.report),v=vehicles.find(x=>x.id===r.vehicleId);if(!r||!v)return;const approve=b.dataset.action==='approve';if(approve&&r.odometer<v.km&&!confirm('Przebieg jest niższy niż zapisany. Oznaczyć zgłoszenie jako sprawdzone bez zmiany licznika?'))return;if(!confirm(approve?'Zatwierdzić zgłoszenie?':'Odrzucić zgłoszenie?'))return;
 try{await runTransaction(db,async tx=>{const rr=doc(db,'reports',r.id),vr=doc(db,'vehicles',r.vehicleId);const rs=await tx.get(rr),vs=await tx.get(vr);if(!rs.exists()||rs.data().status!=='new'||!vs.exists())throw Error('Zgłoszenie już rozpatrzone');tx.update(rr,{status:approve?'approved':'rejected',reviewedAt:serverTimestamp()});if(approve&&r.odometer>vs.data().km)tx.update(vr,{km:r.odometer});});}catch(e){alert(e.message);}};
 }
