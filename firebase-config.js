@@ -1,9 +1,11 @@
-// Wklej tutaj konfigurację aplikacji WWW z Firebase Console > Ustawienia projektu.
-// To są publiczne identyfikatory projektu, nie hasła ani klucze administracyjne.
+
 export const firebaseConfig = {
-  apiKey: "WKLEJ_API_KEY",
-  authDomain: "WKLEJ_AUTH_DOMAIN",
-  projectId: "WKLEJ_PROJECT_ID",
-  appId: "WKLEJ_APP_ID"
+  apiKey: "AIzaSyAcYsFPQ06yXPPY-KOvKT1MfnsF74o2hzY",
+  authDomain: "moja-flota-f2f8d.firebaseapp.com",
+  projectId: "moja-flota-f2f8d",
+  storageBucket: "moja-flota-f2f8d.firebasestorage.app",
+  messagingSenderId: "991131054081",
+  appId: "1:991131054081:web:679f2c93fe13f9ad339000"
 };
-export const configured = firebaseConfig.apiKey !== "WKLEJ_API_KEY";
+
+export const configured = true;
